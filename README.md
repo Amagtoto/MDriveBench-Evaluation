@@ -16,32 +16,29 @@ Before evaluating any submission, ensure to follow the CoLMDriver Global Setup (
 3. Confirm spconv (1.2.1) and pypcd are installed in the base environment, as many baselines and submissions rely on these for voxel feature generation.
 
 ### 1. Submission Retrieval
-To transfer participant submissions from the HuggingFace Hub to the lab's local evaluation server while maintaining version control:
+To transfer participant submissions from  HuggingFace to the lab's local evaluation server:
 
-***Step A: Locate & Clone***
-Each team will provide a link to their HuggingFace repository. Use Git LFS to ensure large model weights are downloaded correctly.
+***Step A:*** Download & Unzip Download the participant's .zip file from the submission portal into the submissions/ directory.
 ```
-# Ensure git-lfs is installed
-git lfs install
-
-# Clone the team's repo into the submissions directory
-cd submissions/
-git clone [https://huggingface.co/teams/Test-Team](https://huggingface.co/teams/Test-Team)
+unzip Team-A_submission.zip -d submissions/Team-A
 ```
 
-***Step B: Verify the files*** Before continuing, verify the following:
-1. Weights: Ensure the .pth file in the ckpt/ folder is the correct size (not a small LFS pointer file).
-2. Env: Ensure model_env.yaml exists.
-3. Entry Point: Verify that team_code/planner.py exists
-
-***Step C: Symbolic Linking*** We use a symbolic link (symlink) to "point" our evaluation script to the team's code without moving files. This ensures a clean workspace.
+***Step B:** Verify Structure Ensure the unzipped folder contains the following files:
 ```
-# Remove the link from the previous evaluation
+agents.py
+config/
+src/
+weights/
+model_env.yaml
+```
+
+***Step C:*** Symbolic Linking Point the evaluation suite to the new submission.
+```
+# Remove previous link and point to the current team
 rm -rf leaderboard/team_code
-
-# Create a new shortcut pointing to the current team
-ln -s ${PWD}/submissions/Team-Alpha/team_code leaderboard/team_code
+ln -s ${PWD}/submissions/Team-A leaderboard/team_code
 ```
+
 
 ### 2. Enviroment Setup
 To prevent discrepancies caused by library version mismatches, we build a fresh environment for every team.
@@ -85,44 +82,93 @@ python tools/run_custom_eval.py \
 The purpose of this evaluation script is that it automates the environment building and the simulation loop as described in the steps 2 and 3.
 ```
 #!/bin/bash
+
+# Usage: bash evaluate_team.sh [TEAM_NAME] [ZIP_FILE_PATH] [GPU_ID]
 TEAM_NAME=$1
-REPO_URL=$2
+ZIP_PATH=$2
+GPU=$3
 
-echo "Starting Evaluation for $TEAM_NAME..."
+# Default GPU to 0 if not provided
+GPU=${GPU:-0}
 
-# 1. Clone
-git clone $REPO_URL submissions/$TEAM_NAME
+echo "-------------------------------------------------------"
+echo "Starting MDriveBench Evaluation for: $TEAM_NAME"
+echo "-------------------------------------------------------"
 
-# 2. Symlink
+# 1. Prepare Workspace
+mkdir -p submissions/$TEAM_NAME
+
+# 2. Extract Submission
+if [[ $ZIP_PATH == *.zip ]]; then
+    echo "[1/5] Extracting ZIP file..."
+    unzip -q $ZIP_PATH -d submissions/$TEAM_NAME
+else
+    echo "ERROR: Please provide a valid .zip file."
+    exit 1
+fi
+
+# 3. Update Symbolic Link (The Bridge)
+echo "[2/5] Updating Symbolic Link..."
 rm -rf leaderboard/team_code
-ln -s ${PWD}/submissions/$TEAM_NAME/team_code leaderboard/team_code
+# Point the bridge to the unzipped team folder
+ln -s ${PWD}/submissions/$TEAM_NAME leaderboard/team_code
 
-# 3. Env Build (if not exists)
-conda env create -f submissions/$TEAM_NAME/model_env.yaml -n mdrive_$TEAM_NAME
+# 4. Environment Provisioning
+echo "[3/5] Checking Conda Environment..."
+# Create env only if it doesn't exist to save time
+if ! conda info --envs | grep -q "mdrive_$TEAM_NAME"; then
+    echo "Building environment from model_env.yaml..."
+    conda env create -f submissions/$TEAM_NAME/model_env.yaml -n mdrive_$TEAM_NAME
+else
+    echo "Environment 'mdrive_$TEAM_NAME' already exists. Skipping build."
+fi
 
-# 4. Run
+# 5. Pre-Run Verification (Inference Servers)
+echo "-------------------------------------------------------"
+echo "CRITICAL CHECK:"
+echo "Are VLM (port 1111) and LLM (port 8888) servers running?"
+echo "They must be launched in separate vllm terminals."
+read -p "Confirm servers are active? (y/n): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborting. Please launch inference servers before evaluating."
+    exit 1
+fi
+
+# 6. Execute Evaluation
+echo "[4/5] Launching CARLA Simulation..."
+source $(conda info --base)/etc/profile.d/conda.sh
 conda activate mdrive_$TEAM_NAME
-export CARLA_ROOT=/path/to/CARLA_0.9.15
-export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg
 
-python tools/run_custom_eval.py --agent leaderboard/team_code/planner.py --port 2000
+# Path Injection (Standardized CARLA 0.9.15)
+export CARLA_ROOT=/path/to/lab/CARLA_0.9.15
+export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg
+export CUDA_VISIBLE_DEVICES=$GPU
+
+python tools/run_custom_eval.py \
+    --agent leaderboard/team_code/agents.py \
+    --checkpoint submissions/$TEAM_NAME/weights/model.pth \
+    --routes data/warmup_routes.xml \
+    --port 2000
+
+# 7. Finalize
+echo "[5/5] Evaluation Complete."
+echo "Results saved in submissions/$TEAM_NAME/results/"
+echo "-------------------------------------------------------"
 ```
 
 # MDriveBench Submission Instructions
-To ensure your model is compatible and evaluated accurately by our lab, all submissions must adhere to the following directory structure and environment requirements.
+To ensure your model is evaluated accurately, you must submit a single .zip file containing your model and code.
 
-## Required Repository Structure
-Your HuggingFace repository must be organized as follows:
+## Required ZIP File Structure
+Your ZIP file must be organized as follows:
 ```
-/ (root)
-├── team_code/
-│   ├── planner.py          # Main agent class (must inherit from BaseAgent)
-│   └── [others].py         # Your model architecture and utility files
-├── ckpt/
-│   └── model.pth           # Trained weights (or multiple files if required)
-├── configs/
-│   └── submission_config.yaml  # Model hyperparams, sensor FOV, and V2X settings
-└── model_env.yaml          # Standard Conda environment specification
+team_name.zip
+├── agents.py           # Main agent class (must inherit from BaseAgent)
+├── config/             # Folder containing all .yaml or .py configs
+├── src/                # Folder containing model architecture & utilities
+├── weights/            # Folder containing all trained checkpoints (.pth/.ckpt)
+└── model_env.yaml      # Conda environment specification
 ```
 
 ## Enviroment Specification (model_env.yaml)
