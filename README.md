@@ -23,7 +23,7 @@ To transfer participant submissions from  HuggingFace to the lab's local evaluat
 unzip Team-A_submission.zip -d submissions/Team-A
 ```
 
-***Step B:** Verify Structure Ensure the unzipped folder contains the following files:
+***Step B:*** Verify Structure Ensure the unzipped folder contains the following files:
 ```
 agents.py
 config/
@@ -86,59 +86,66 @@ The purpose of this evaluation script is that it automates the environment build
 # Usage: bash evaluate_team.sh [TEAM_NAME] [ZIP_FILE_PATH] [GPU_ID]
 TEAM_NAME=$1
 ZIP_PATH=$2
-GPU=$3
-
-# Default GPU to 0 if not provided
-GPU=${GPU:-0}
+GPU=${3:-0}
 
 echo "-------------------------------------------------------"
 echo "Starting MDriveBench Evaluation for: $TEAM_NAME"
 echo "-------------------------------------------------------"
 
 # 1. Prepare Workspace
-mkdir -p submissions/$TEAM_NAME
+SUBMISSION_DIR="${PWD}/submissions/$TEAM_NAME"
+mkdir -p "$SUBMISSION_DIR"
 
 # 2. Extract Submission
 if [[ $ZIP_PATH == *.zip ]]; then
-    echo "[1/5] Extracting ZIP file..."
-    unzip -q $ZIP_PATH -d submissions/$TEAM_NAME
+    echo "[1/6] Extracting ZIP file..."
+    unzip -qo "$ZIP_PATH" -d "$SUBMISSION_DIR"
 else
     echo "ERROR: Please provide a valid .zip file."
     exit 1
 fi
 
-# 3. Update Symbolic Link (The Bridge)
-echo "[2/5] Updating Symbolic Link..."
-rm -rf leaderboard/team_code
-# Point the bridge to the unzipped team folder
-ln -s ${PWD}/submissions/$TEAM_NAME leaderboard/team_code
+# 3. ZIP Format Validation (NEW)
+echo "[2/6] Validating file structure..."
+MISSING_FILES=()
+[[ ! -f "$SUBMISSION_DIR/agents.py" ]] && MISSING_FILES+=("agents.py")
+[[ ! -d "$SUBMISSION_DIR/config" ]] && MISSING_FILES+=("config/")
+[[ ! -d "$SUBMISSION_DIR/src" ]] && MISSING_FILES+=("src/")
+[[ ! -d "$SUBMISSION_DIR/weights" ]] && MISSING_FILES+=("weights/")
+[[ ! -f "$SUBMISSION_DIR/model_env.yaml" ]] && MISSING_FILES+=("model_env.yaml")
 
-# 4. Environment Provisioning
-echo "[3/5] Checking Conda Environment..."
-# Create env only if it doesn't exist to save time
-if ! conda info --envs | grep -q "mdrive_$TEAM_NAME"; then
-    echo "Building environment from model_env.yaml..."
-    conda env create -f submissions/$TEAM_NAME/model_env.yaml -n mdrive_$TEAM_NAME
-else
-    echo "Environment 'mdrive_$TEAM_NAME' already exists. Skipping build."
-fi
-
-# 5. Pre-Run Verification (Inference Servers)
-echo "-------------------------------------------------------"
-echo "CRITICAL CHECK:"
-echo "Are VLM (port 1111) and LLM (port 8888) servers running?"
-echo "They must be launched in separate vllm terminals."
-read -p "Confirm servers are active? (y/n): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Aborting. Please launch inference servers before evaluating."
+if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+    echo "ERROR: Invalid ZIP format. Missing: ${MISSING_FILES[*]}"
     exit 1
 fi
+echo "Structure validated successfully."
 
-# 6. Execute Evaluation
-echo "[4/5] Launching CARLA Simulation..."
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate mdrive_$TEAM_NAME
+# 4. Update Symbolic Link
+echo "[3/6] Updating Symbolic Link..."
+rm -rf leaderboard/team_code
+ln -s "$SUBMISSION_DIR" leaderboard/team_code
+
+# 5. Environment Provisioning
+echo "[4/6] Setting up Conda Environment..."
+# Initialize conda for bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+ENV_NAME="mdrive_$TEAM_NAME"
+if ! conda info --envs | grep -q "$ENV_NAME"; then
+    echo "Building new environment: $ENV_NAME..."
+    conda env create -f "$SUBMISSION_DIR/model_env.yaml" -n "$ENV_NAME" || { echo "Conda build failed"; exit 1; }
+fi
+
+# 6. Pre-Run 
+echo "-------------------------------------------------------"
+echo "CRITICAL CHECK: Are VLM and LLM active?"
+read -p "Confirm (y/n): " -n 1 -r
+echo
+[[ ! $REPLY =~ ^[Yy]$ ]] && { echo "Aborting."; exit 1; }
+
+# 7. Execute Evaluation
+echo "[5/6] Launching CARLA Simulation..."
+conda activate "$ENV_NAME"
 
 # Path Injection (Standardized CARLA 0.9.15)
 export CARLA_ROOT=/path/to/lab/CARLA_0.9.15
@@ -147,14 +154,12 @@ export CUDA_VISIBLE_DEVICES=$GPU
 
 python tools/run_custom_eval.py \
     --agent leaderboard/team_code/agents.py \
-    --checkpoint submissions/$TEAM_NAME/weights/model.pth \
+    --checkpoint "$SUBMISSION_DIR/weights/model.pth" \
     --routes data/warmup_routes.xml \
     --port 2000
 
-# 7. Finalize
-echo "[5/5] Evaluation Complete."
-echo "Results saved in submissions/$TEAM_NAME/results/"
-echo "-------------------------------------------------------"
+# 8. Finalize
+echo "[6/6] Evaluation Complete."
 ```
 
 # MDriveBench Submission Instructions
