@@ -241,17 +241,19 @@ team_name.zip
 └── model_env.yaml      # Conda environment specification
 ```
 
-## Enviroment Specification (model_env.yaml)
-Due to the varying requirements of driving foundation models, we will build a dedicated Conda environment for your submission.
+## Environment Specification
+MDriveBench supports two methods of environment provisioning. To ensure 100% reproducibility, we strongly recommend providing a Dockerfile.
 
-* Your model_env.yaml should include all specific dependencies (e.g., transformers, timm, spconv).
-* We recommend basing your environment on Python 3.8+ and PyTorch 2.1+.
-* Do not include CARLA in your YAML; the evaluation server will automatically link a standardized CARLA 0.9.15 build to your environment to ensure physics consistency.
+1. ***Docker (Primary):*** Your Dockerfile should be based on a stable CUDA image (e.g., nvidia/cuda:11.3.1-devel-ubuntu20.04). It must install all necessary libraries so that the agent can run immediately upon container launch.
+
+2. ***Conda (Fallback):*** If no Dockerfile is provided, we will build a dedicated environment using your model_env.yaml.
+Note: Your code must be compatible with Python 3.7 to interface with the CARLA 0.9.10.1 API.
+Do not include CARLA in your environment files; the evaluation server will automatically link the standardized CARLA 0.9.10.1 build.
 
 ## Evaluation Protocol 
 Our team will manually verify your submission using the following pipeline:
 
-1. Env Build: conda env create -f model_env.yaml
+1. Env Build: The evaluator prioritizes the Dockerfile. If missing, it builds the Conda environment from model_env.yaml.
 2. Path Injection: Standardized CARLA 0.9.15 PythonAPI will be appended to your PYTHONPATH.
-3. Execution: Your agent will be run through a batch of closed-loop scenarios (Standard, Pre-crash, and Safety-critical).
+3. Execution: Your agent will be run through a batch of closed-loop scenarios (OpenCDA, InterDrive, and Safety-critical).
 4. Scoring: We will record the Driving Score (DS) and Success Rate (SR) as the official leaderboard metrics.
