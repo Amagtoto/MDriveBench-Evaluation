@@ -230,17 +230,18 @@ python aggregate_scores.py --team "$TEAM_NAME" --results_dir "results"
 ```
 
 # MDriveBench Submission Instructions
-To ensure your model is evaluated accurately, you must submit a single .zip file containing your model and code.
+To ensure your model is evaluated accurately, participants must submit a single .zip file containing the model, source code, and environment specifications.
 
 ## Required ZIP File Structure
 Your ZIP file must be organized as follows:
 ```
 team_name.zip
-├── agents.py           # Main agent class (must inherit from BaseAgent)
-├── config/             # Folder containing all .yaml or .py configs
+├── agents.py           # Main agent class (must inherit from TrackableAgent)
+├── Dockerfile          # Highly recommended
+├── model_env.yaml      # Conda/Pip environment specification (Fallback)
+├── config/             # Folder containing submission_config.yaml and other configs
 ├── src/                # Folder containing model architecture & utilities
-├── weights/            # Folder containing all trained checkpoints (.pth/.ckpt)
-└── model_env.yaml      # Conda environment specification
+└── weights/            # Folder containing all trained checkpoints (.pth/.ckpt)
 ```
 
 ## Environment Specification
