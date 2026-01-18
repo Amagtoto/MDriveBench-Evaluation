@@ -136,16 +136,17 @@ Run it:
 #!/bin/bash
 
 # ==============================================================================
-# MDriveBench  Evaluation Script
-# Target Path: /data2/angela_test_envs/CoLMDriver
+# MDriveBench Universal Evaluation Script
+# Usage: bash evaluate_all.sh <TEAM_NAME> <SUBMISSION_ZIP> <GPU_ID>
 # ==============================================================================
 
-TEAM_NAME=$1      
-SUBMISSION_ZIP=$2 
-GPU=${3:-0}
-PORT=2002 
+TEAM_NAME=$1       # Arg 1: Team Name (e.g., tcp, lmdrive, team_alpha)
+SUBMISSION_ZIP=$2   # Arg 2: Path to the submission .zip
+GPU=${3:-0}         # Arg 3: GPU ID (Defaults to 0)
+PORT=2002           # Hardcoded Port
 
 # --- 1. Workspace Initialization ---
+# We unzip the new submission into a dedicated folder
 SUB_DIR="${PWD}/submissions/$TEAM_NAME"
 mkdir -p "$SUB_DIR"
 unzip -qo "$SUBMISSION_ZIP" -d "$SUB_DIR"
@@ -154,78 +155,71 @@ unzip -qo "$SUBMISSION_ZIP" -d "$SUB_DIR"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
 if [[ -f "$SUB_DIR/Dockerfile" ]]; then
-    echo ">>> [ENV] Dockerfile detected. Building Image: mdrive_$TEAM_NAME"
+    echo ">>> [ENV] Dockerfile detected. Building isolated container..."
     docker build -t "mdrive_$TEAM_NAME" "$SUB_DIR"
+    # Map host CARLA and use host network for the simulator connection
     RUN_CMD="docker run --rm --gpus all --net=host -v ${PWD}/external_paths/carla_root:/workspace/carla_root mdrive_$TEAM_NAME"
 else
-    echo ">>> [ENV] No Dockerfile. Checking for pre-setup baseline in /data2..."
+    echo ">>> [ENV] No Dockerfile. Checking for lab baseline or building Conda..."
     case $TEAM_NAME in
       "tcp")        ENV_PATH="/data2/angela_test_envs/CoLMDriver/envs/tcp_codriving" ;;
       "vad")        ENV_PATH="/data2/angela_test_envs/CoLMDriver/envs/vad_env" ;;
       "colmdriver") ENV_PATH="/data2/angela_test_envs/CoLMDriver/envs/colmdriver" ;;
-      *)            ENV_PATH="" ;; 
+      *)            ENV_PATH="mdrive_$TEAM_NAME" ;; 
     esac
 
-    if [[ -n "$ENV_PATH" && -d "$ENV_PATH" ]]; then
+    if [[ -d "$ENV_PATH" ]]; then
+        echo ">>> [ENV] Activating existing baseline: $ENV_PATH"
         conda activate "$ENV_PATH"
-        RUN_CMD="python"
     else
-        if ! conda info --envs | grep -q "mdrive_$TEAM_NAME"; then
-            conda env create -f "$SUB_DIR/model_env.yaml" -n "mdrive_$TEAM_NAME"
-        fi
+        echo ">>> [ENV] Creating fresh environment from model_env.yaml..."
+        conda env create -f "$SUB_DIR/model_env.yaml" -n "mdrive_$TEAM_NAME"
         conda activate "mdrive_$TEAM_NAME"
-        RUN_CMD="python"
     fi
+    RUN_CMD="python"
 fi
 
-# --- 3. Global Paths ---
+# --- 3. Path & GPU Exports ---
 export CARLA_ROOT=${PWD}/external_paths/carla_root
 export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.10-py3.7-linux-x86_64.egg
 export CUDA_VISIBLE_DEVICES=$GPU
 
 # ==============================================================================
-# BATCH 1: OpenCDA (12 ZIPs)
+# UNIFIED LOOP: Processes All 20 Scenarios (ZIPs and Folders)
 # ==============================================================================
-echo ">>> [BATCH 1/3] Running OpenCDA Scenarios..."
-for zipfile in opencdascenarios/*.zip; do
-    name=$(basename "$zipfile" .zip)
-    $RUN_CMD tools/run_custom_eval.py \
-      --zip "$zipfile" \
-      --scenario-name "$name" \
-      --results-tag "${name}_${TEAM_NAME}" \
-      --agent "$SUB_DIR/agents.py" \
-      --agent-config "$SUB_DIR/config/submission_config.yaml" \
-      --port $PORT
+SCENARIO_DIR="/data2/angela_test_envs/CoLMDriver/all_warmup_scenarios"
+
+for item in "$SCENARIO_DIR"/*; do
+    name=$(basename "$item")
+    echo "-------------------------------------------------------"
+    echo "STARTING: $name"
+    echo "-------------------------------------------------------"
+
+    if [[ -d "$item" ]]; then
+        # Handle Interdrive Directory (r23, r45, etc.)
+        $RUN_CMD tools/run_custom_eval.py \
+          --routes-dir "$item" \
+          --results-tag "interdrive_${name}_${TEAM_NAME}" \
+          --agent "$SUB_DIR/agents.py" \
+          --agent-config "$SUB_DIR/config/submission_config.yaml" \
+          --port $PORT
+    elif [[ "$item" == *.zip ]]; then
+        # Handle OpenCDA (A,D,F,J) and Safety-Critical ZIPs
+        prefix="scen"
+        [[ "$name" == safety* ]] && prefix="safety"
+        
+        $RUN_CMD tools/run_custom_eval.py \
+          --zip "$item" \
+          --scenario-name "${name%.zip}" \
+          --results-tag "${prefix}_${name%.zip}_${TEAM_NAME}" \
+          --agent "$SUB_DIR/agents.py" \
+          --agent-config "$SUB_DIR/config/submission_config.yaml" \
+          --port $PORT
+    fi
 done
 
-# ==============================================================================
-# BATCH 2: InterDrive (Full Suite)
-# ==============================================================================
-echo ">>> [BATCH 2/3] Running InterDrive Benchmark..."
-bash scripts/eval/eval_mode.sh $GPU $PORT $TEAM_NAME ideal Interdrive_all
-
-# ==============================================================================
-# BATCH 3: Safety-Critical (All 8 ZIPs)
-# ==============================================================================
-
-echo ">>> [BATCH 3/3] Running All 8 Safety-Critical Scenarios..."
-SAFETY_DIR="/data2/angela_test_envs/CoLMDriver/safety_critical_scenarios"
-
-for zipfile in "$safety"/*.zip; do
-    name=$(basename "$zipfile" .zip)
-    echo "Running Safety Scenario: $name"
-    
-    $RUN_CMD tools/run_custom_eval.py \
-      --zip "$zipfile" \
-      --scenario-name "$name" \
-      --results-tag "safety_${name}_${TEAM_NAME}" \
-      --agent "$SUB_DIR/agents.py" \
-      --agent-config "$SUB_DIR/config/submission_config.yaml" \
-      --port $PORT
-done
-
-# --- AUTOMATIC AGGREGATION ---
-echo ">>> Launching Score Aggregator..."
+# --- 4. Final Aggregation ---
+echo ">>> Generating formatted report..."
 python aggregate_scores.py --team "$TEAM_NAME" --results_dir "results"
 ```
 
