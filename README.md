@@ -17,7 +17,7 @@ Evaluation consists of 3 main phases: Submission Retrieval, Environment Setup, a
 
 Before evaluating any submission, ensure to follow the CoLMDriver Global Setup (https://github.com/marco-cos/CoLMDriver)
 
-1. Verify CARLA 0.9.15 is installed and the egg is linked.
+1. Verify CARLA 0.9.12 is installed and the egg is linked.
 2. Ensure the vllm (for inference) and colmdriver (for simulation) environments are functional.
 3. Confirm spconv (1.2.1) and pypcd are installed in the base environment, as many baselines and submissions rely on these for voxel feature generation.
 
@@ -54,10 +54,10 @@ conda env create -f submissions/Test-Team/model_env.yaml -n mdrive_eval_test
 conda activate mdrive_eval_test
 ```
 ### 3. Checkpoint Evaluation
-***Step A:*** Inject the standardized CARLA paths into the active team environment.
+***Step A:*** Inject the standardized CARLA 0.9.12 paths into the active team environment.
 ```
-export CARLA_ROOT=/path/to/lab/CARLA_0.9.15
-export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg
+export CARLA_ROOT=/path/to/lab/CARLA_0.9.12
+export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 ```
 ***Step B:*** Running VLM, LLM (from repository root)
 ```
@@ -181,7 +181,7 @@ fi
 
 # --- 3. Path & GPU Exports ---
 export CARLA_ROOT=${PWD}/external_paths/carla_root
-export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.10-py3.7-linux-x86_64.egg
+export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 export CUDA_VISIBLE_DEVICES=$GPU
 
 # ==============================================================================
@@ -244,13 +244,13 @@ MDriveBench supports two methods of environment provisioning. To ensure 100% rep
 1. ***Docker (Primary):*** Your Dockerfile should be based on a stable CUDA image (e.g., nvidia/cuda:11.3.1-devel-ubuntu20.04). It must install all necessary libraries so that the agent can run immediately upon container launch.
 
 2. ***Conda (Fallback):*** If no Dockerfile is provided, we will build a dedicated environment using your model_env.yaml.
-Note: Your code must be compatible with Python 3.7 to interface with the CARLA 0.9.10.1 API.
-Do not include CARLA in your environment files; the evaluation server will automatically link the standardized CARLA 0.9.10.1 build.
+Note: Your code must be compatible with Python 3.7 to interface with the CARLA 0.9.12 API.
+Do not include CARLA in your environment files; the evaluation server will automatically link the standardized CARLA 0.9.12 build.
 
 ## Evaluation Protocol 
 Our team will manually verify your submission using the following pipeline:
 
 1. Env Build: The evaluator prioritizes the Dockerfile. If missing, it builds the Conda environment from model_env.yaml.
-2. Path Injection: Standardized CARLA 0.9.15 PythonAPI will be appended to your PYTHONPATH.
+2. Path Injection: Standardized CARLA 0.9.12 PythonAPI will be appended to your PYTHONPATH.
 3. Execution: Your agent will be run through a batch of closed-loop scenarios (OpenCDA, InterDrive, and Safety-critical).
 4. Scoring: We will record the Driving Score (DS) and Success Rate (SR) as the official leaderboard metrics.
